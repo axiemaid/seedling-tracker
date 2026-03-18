@@ -49,6 +49,14 @@ MORPH_ITER = 2
 # Margin inside each cell to avoid counting edge pixels (% of cell size)
 CELL_MARGIN_PCT = 5
 
+# Custom column boundaries (x positions). Set to None for even spacing.
+# Adjust these to align grid lines with actual plant columns.
+# 7 values for 6 columns: [left_edge, col1|col2, col2|col3, ..., right_edge]
+CUSTOM_COL_BOUNDS = [0, 151, 341, 512, 683, 823, 1024]
+
+# Custom row boundaries. Set to None for even spacing.
+CUSTOM_ROW_BOUNDS = None
+
 
 def ensure_dirs():
     for d in [OUTPUT_DIR, ANNOTATED_DIR, TUNE_DIR]:
@@ -91,27 +99,39 @@ def segment_green(img):
 
 def get_grid_cells(img_h, img_w):
     """
-    Compute 28 fixed grid cells. Each cell has a consistent ID (1-28).
-    Returns list of dicts: id, row, col, x, y, w, h (with margin applied).
+    Compute fixed grid cells with optional custom boundaries.
+    Each cell has a consistent ID (1-N).
     """
-    cell_w = img_w / GRID_COLS
-    cell_h = img_h / GRID_ROWS
-    mx = int(cell_w * CELL_MARGIN_PCT / 100)
-    my = int(cell_h * CELL_MARGIN_PCT / 100)
+    # Column boundaries
+    if CUSTOM_COL_BOUNDS:
+        col_bounds = CUSTOM_COL_BOUNDS
+    else:
+        col_bounds = [round(c * img_w / GRID_COLS) for c in range(GRID_COLS + 1)]
+
+    # Row boundaries
+    if CUSTOM_ROW_BOUNDS:
+        row_bounds = CUSTOM_ROW_BOUNDS
+    else:
+        row_bounds = [round(r * img_h / GRID_ROWS) for r in range(GRID_ROWS + 1)]
 
     cells = []
     for r in range(GRID_ROWS):
         for c in range(GRID_COLS):
-            cell_id = r * GRID_COLS + c + 1  # 1-28, consistent
-            x = int(c * cell_w) + mx
-            y = int(r * cell_h) + my
-            w = int(cell_w) - 2 * mx
-            h = int(cell_h) - 2 * my
+            cell_id = r * GRID_COLS + c + 1
+            x1 = col_bounds[c]
+            x2 = col_bounds[c + 1]
+            y1 = row_bounds[r]
+            y2 = row_bounds[r + 1]
+            cw = x2 - x1
+            ch = y2 - y1
+            mx = int(cw * CELL_MARGIN_PCT / 100)
+            my = int(ch * CELL_MARGIN_PCT / 100)
             cells.append({
                 "id": cell_id,
                 "row": r,
                 "col": c,
-                "x": x, "y": y, "w": w, "h": h,
+                "x": x1 + mx, "y": y1 + my,
+                "w": cw - 2 * mx, "h": ch - 2 * my,
             })
     return cells
 
@@ -155,21 +175,26 @@ def draw_annotated(img, mask, cells, measurements, stats):
     overlay[mask > 0] = (0, 220, 0)
     out = cv2.addWeighted(out, 0.7, overlay, 0.3, 0)
 
-    cell_w = w / GRID_COLS
-    cell_h = h / GRID_ROWS
+    # Grid boundaries
+    if CUSTOM_COL_BOUNDS:
+        col_bounds = CUSTOM_COL_BOUNDS
+    else:
+        col_bounds = [round(c * w / GRID_COLS) for c in range(GRID_COLS + 1)]
+    if CUSTOM_ROW_BOUNDS:
+        row_bounds = CUSTOM_ROW_BOUNDS
+    else:
+        row_bounds = [round(r * h / GRID_ROWS) for r in range(GRID_ROWS + 1)]
 
     # Grid lines
-    for c in range(GRID_COLS + 1):
-        x = int(c * cell_w)
+    for x in col_bounds:
         cv2.line(out, (x, 0), (x, h), (100, 100, 100), 1)
-    for r in range(GRID_ROWS + 1):
-        y = int(r * cell_h)
+    for y in row_bounds:
         cv2.line(out, (0, y), (w, y), (100, 100, 100), 1)
 
     # Per-cell labels
     for m in measurements:
-        cx = int((m["col"] + 0.5) * cell_w)
-        cy = int((m["row"] + 0.5) * cell_h)
+        cx = (col_bounds[m["col"]] + col_bounds[m["col"] + 1]) // 2
+        cy = (row_bounds[m["row"]] + row_bounds[m["row"] + 1]) // 2
 
         # Color code: white if low coverage, green if high
         color = (0, 255, 255) if m["coverage_pct"] > 1.0 else (150, 150, 150)
