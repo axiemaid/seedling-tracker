@@ -197,12 +197,12 @@ def draw_annotated(img, mask, cells, measurements, stats):
         cy = (row_bounds[m["row"]] + row_bounds[m["row"] + 1]) // 2
 
         # Color code: white if low coverage, green if high
-        color = (0, 255, 255) if m["coverage_pct"] > 1.0 else (150, 150, 150)
+        color = (0, 255, 255) if m["green_pixels"] > 100 else (150, 150, 150)
 
         cv2.putText(out, f"#{m['id']}",
                     (cx - 12, cy - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
-        cv2.putText(out, f"{m['coverage_pct']:.1f}%",
+        cv2.putText(out, f"{m['green_pixels']}px",
                     (cx - 18, cy + 8),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
 
