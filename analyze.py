@@ -3,24 +3,14 @@
 Seedling Growth Analyzer
 ========================
 
-Processes captured images to measure green plant coverage.
-No GUI required. No perspective correction needed (camera is fixed overhead).
-
-Finds individual plant blobs via HSV segmentation, measures area,
-logs to CSV, saves annotated images.
+Fixed 4x7 grid — each cell is one plant slot, consistent across captures.
+No GUI required. Camera is fixed overhead.
 
 Usage:
-    # Analyze all new images
-    python3 analyze.py
-
-    # Analyze a specific image
-    python3 analyze.py --image images/2026-03-18_17-59-38.jpg
-
-    # Reprocess everything
-    python3 analyze.py --reprocess
-
-    # Tune HSV thresholds on a sample (saves debug images)
-    python3 analyze.py --tune --image images/2026-03-18_17-59-38.jpg
+    python3 analyze.py                    # Analyze all new images
+    python3 analyze.py --image FILE       # Analyze one image
+    python3 analyze.py --reprocess        # Redo all
+    python3 analyze.py --tune --image FILE  # Save debug images for HSV tuning
 """
 
 import argparse
@@ -44,24 +34,20 @@ TUNE_DIR = os.path.join(OUTPUT_DIR, "tune")
 CSV_FILE = os.path.join(OUTPUT_DIR, "growth_log.csv")
 STATE_FILE = os.path.join(OUTPUT_DIR, ".state.json")
 
-# HSV thresholds for bright yellow-green cotyledons under grow light
-# Hue 25-80 covers yellow-green through green
-# Sat 30+ excludes white/gray reflections
-# Val 100+ excludes dark shadows
+# Grid: 4 rows x 7 columns = 28 plant slots
+GRID_ROWS = 4
+GRID_COLS = 7
+
+# HSV thresholds for yellow-green cotyledons under grow light
 HSV_LOWER = (25, 30, 100)
 HSV_UPPER = (80, 255, 255)
-
-# Minimum blob area in pixels to count as a plant (filters noise)
-MIN_BLOB_AREA = 80
 
 # Morphological cleanup
 MORPH_KERNEL = 5
 MORPH_ITER = 2
 
-# Image is 1024x768 (XGA). Define a crop region to exclude tray edges.
-# Set to None to use the full image.
-# Format: (x, y, w, h) or None
-CROP_REGION = None
+# Margin inside each cell to avoid counting edge pixels (% of cell size)
+CELL_MARGIN_PCT = 5
 
 
 def ensure_dirs():
@@ -82,7 +68,6 @@ def save_state(state):
 
 
 def parse_timestamp(filepath):
-    """Extract timestamp from filename like 2026-03-18_17-59-38.jpg"""
     stem = Path(filepath).stem
     for fmt in ["%Y-%m-%d_%H-%M-%S", "%Y-%m-%d_%H%M%S"]:
         try:
@@ -93,7 +78,7 @@ def parse_timestamp(filepath):
 
 
 def segment_green(img):
-    """HSV threshold + morphological cleanup → binary mask of green pixels."""
+    """HSV threshold + morphological cleanup → binary mask."""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
     mask = cv2.inRange(hsv, np.array(HSV_LOWER), np.array(HSV_UPPER))
 
@@ -104,36 +89,55 @@ def segment_green(img):
     return mask
 
 
-def find_blobs(mask):
-    """Find contours above minimum area. Returns list of contour info dicts."""
-    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+def get_grid_cells(img_h, img_w):
+    """
+    Compute 28 fixed grid cells. Each cell has a consistent ID (1-28).
+    Returns list of dicts: id, row, col, x, y, w, h (with margin applied).
+    """
+    cell_w = img_w / GRID_COLS
+    cell_h = img_h / GRID_ROWS
+    mx = int(cell_w * CELL_MARGIN_PCT / 100)
+    my = int(cell_h * CELL_MARGIN_PCT / 100)
 
-    blobs = []
-    for cnt in contours:
-        area = cv2.contourArea(cnt)
-        if area < MIN_BLOB_AREA:
-            continue
-        M = cv2.moments(cnt)
-        cx = int(M["m10"] / M["m00"]) if M["m00"] > 0 else 0
-        cy = int(M["m01"] / M["m00"]) if M["m00"] > 0 else 0
-        x, y, w, h = cv2.boundingRect(cnt)
+    cells = []
+    for r in range(GRID_ROWS):
+        for c in range(GRID_COLS):
+            cell_id = r * GRID_COLS + c + 1  # 1-28, consistent
+            x = int(c * cell_w) + mx
+            y = int(r * cell_h) + my
+            w = int(cell_w) - 2 * mx
+            h = int(cell_h) - 2 * my
+            cells.append({
+                "id": cell_id,
+                "row": r,
+                "col": c,
+                "x": x, "y": y, "w": w, "h": h,
+            })
+    return cells
 
-        blobs.append({
-            "area": int(area),
-            "center_x": cx,
-            "center_y": cy,
-            "bbox_x": x, "bbox_y": y, "bbox_w": w, "bbox_h": h,
-            "contour": cnt,
+
+def measure_cells(mask, cells):
+    """Measure green pixel coverage in each grid cell."""
+    results = []
+    for cell in cells:
+        x, y, w, h = cell["x"], cell["y"], cell["w"], cell["h"]
+        cell_mask = mask[y:y+h, x:x+w]
+        green_px = int(np.sum(cell_mask > 0))
+        total_px = w * h
+        coverage = round(green_px / total_px * 100, 3) if total_px > 0 else 0
+
+        results.append({
+            "id": cell["id"],
+            "row": cell["row"],
+            "col": cell["col"],
+            "green_pixels": green_px,
+            "total_pixels": total_px,
+            "coverage_pct": coverage,
         })
-
-    # Sort top-left to bottom-right (row-major by center position)
-    blobs.sort(key=lambda b: (b["center_y"] // 80, b["center_x"]))
-
-    return blobs
+    return results
 
 
 def check_quality(img):
-    """Quick brightness/blur check. Returns (ok, brightness, sharpness)."""
     gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
     brightness = float(gray.mean())
     sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
@@ -141,48 +145,57 @@ def check_quality(img):
     return ok, brightness, sharpness
 
 
-def draw_annotated(img, mask, blobs, stats):
-    """Draw green overlay + blob labels on image."""
+def draw_annotated(img, mask, cells, measurements, stats):
+    """Draw grid overlay with per-cell coverage labels."""
     out = img.copy()
+    h, w = out.shape[:2]
 
     # Green tint on detected pixels
     overlay = np.zeros_like(out)
     overlay[mask > 0] = (0, 220, 0)
     out = cv2.addWeighted(out, 0.7, overlay, 0.3, 0)
 
-    # Label each blob
-    for i, b in enumerate(blobs):
-        # Bounding box
-        cv2.rectangle(out,
-                      (b["bbox_x"], b["bbox_y"]),
-                      (b["bbox_x"] + b["bbox_w"], b["bbox_y"] + b["bbox_h"]),
-                      (255, 255, 255), 1)
+    cell_w = w / GRID_COLS
+    cell_h = h / GRID_ROWS
 
-        # ID + area
-        label = f"{i+1}"
-        cv2.putText(out, label,
-                    (b["center_x"] - 6, b["center_y"] - 8),
+    # Grid lines
+    for c in range(GRID_COLS + 1):
+        x = int(c * cell_w)
+        cv2.line(out, (x, 0), (x, h), (100, 100, 100), 1)
+    for r in range(GRID_ROWS + 1):
+        y = int(r * cell_h)
+        cv2.line(out, (0, y), (w, y), (100, 100, 100), 1)
+
+    # Per-cell labels
+    for m in measurements:
+        cx = int((m["col"] + 0.5) * cell_w)
+        cy = int((m["row"] + 0.5) * cell_h)
+
+        # Color code: white if low coverage, green if high
+        color = (0, 255, 255) if m["coverage_pct"] > 1.0 else (150, 150, 150)
+
+        cv2.putText(out, f"#{m['id']}",
+                    (cx - 12, cy - 10),
                     cv2.FONT_HERSHEY_SIMPLEX, 0.35, (255, 255, 255), 1)
-        area_label = f"{b['area']}px"
-        cv2.putText(out, area_label,
-                    (b["center_x"] - 15, b["center_y"] + 12),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.3, (0, 255, 255), 1)
+        cv2.putText(out, f"{m['coverage_pct']:.1f}%",
+                    (cx - 18, cy + 8),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.35, color, 1)
 
-    # Summary bar at top
-    h, w = out.shape[:2]
+    # Summary bar
     cv2.rectangle(out, (0, 0), (w, 28), (0, 0, 0), -1)
-    summary = (f"Plants: {stats['blob_count']} | "
-               f"Green: {stats['coverage_pct']:.2f}% | "
-               f"Total area: {stats['total_green_px']}px | "
+    active = sum(1 for m in measurements if m["coverage_pct"] > 0.5)
+    summary = (f"Active plants: {active}/28 | "
+               f"Avg coverage: {stats['avg_coverage']:.2f}% | "
+               f"Total green: {stats['total_green_px']}px | "
                f"Brightness: {stats['brightness']:.0f}")
     cv2.putText(out, summary, (8, 19),
-                cv2.FONT_HERSHEY_SIMPLEX, 0.45, (255, 255, 255), 1)
+                cv2.FONT_HERSHEY_SIMPLEX, 0.42, (255, 255, 255), 1)
 
     return out
 
 
 def analyze_image(filepath):
-    """Full analysis pipeline for one image. Returns stats dict or None."""
+    """Full analysis pipeline for one image."""
     img = cv2.imread(filepath)
     if img is None:
         print(f"  ERROR: can't load {filepath}")
@@ -190,11 +203,7 @@ def analyze_image(filepath):
 
     ts = parse_timestamp(filepath)
     ts_str = ts.strftime("%Y-%m-%d_%H-%M-%S")
-
-    # Crop if configured
-    if CROP_REGION:
-        x, y, w, h = CROP_REGION
-        img = img[y:y+h, x:x+w]
+    h, w = img.shape[:2]
 
     # Quality check
     quality_ok, brightness, sharpness = check_quality(img)
@@ -202,101 +211,68 @@ def analyze_image(filepath):
     # Segment
     mask = segment_green(img)
 
-    # Find blobs
-    blobs = find_blobs(mask)
+    # Measure fixed grid cells
+    cells = get_grid_cells(h, w)
+    measurements = measure_cells(mask, cells)
 
-    # Stats
-    total_px = img.shape[0] * img.shape[1]
+    # Aggregate stats
+    total_px = h * w
     green_px = int(np.sum(mask > 0))
-    coverage = round(green_px / total_px * 100, 3) if total_px > 0 else 0
-    blob_areas = [b["area"] for b in blobs]
+    coverages = [m["coverage_pct"] for m in measurements]
+    active_cells = [m for m in measurements if m["coverage_pct"] > 0.5]
 
     stats = {
         "timestamp": ts_str,
-        "blob_count": len(blobs),
         "total_green_px": green_px,
-        "total_pixels": total_px,
-        "coverage_pct": coverage,
-        "mean_blob_area": round(np.mean(blob_areas), 1) if blob_areas else 0,
-        "max_blob_area": max(blob_areas) if blob_areas else 0,
-        "min_blob_area": min(blob_areas) if blob_areas else 0,
+        "total_coverage_pct": round(green_px / total_px * 100, 3),
+        "avg_coverage": round(np.mean(coverages), 3),
+        "active_plants": len(active_cells),
         "brightness": brightness,
         "sharpness": sharpness,
         "quality_ok": quality_ok,
+        "measurements": measurements,
     }
 
-    # Skip dark/bad images from annotation but still log them
     if not quality_ok:
         flag = "DARK" if brightness < 40 else "BLUR"
-        print(f"  {ts_str} | {flag} (brightness={brightness:.0f}, "
-              f"sharpness={sharpness:.0f}) — skipping annotation")
+        print(f"  {ts_str} | {flag} (brightness={brightness:.0f}) — skipping annotation")
     else:
-        # Save annotated image
-        annotated = draw_annotated(img, mask, blobs, stats)
+        annotated = draw_annotated(img, mask, cells, measurements, stats)
         ann_path = os.path.join(ANNOTATED_DIR, f"{ts_str}.jpg")
         cv2.imwrite(ann_path, annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
-    # Print summary
     q = "OK" if quality_ok else "WARN"
-    print(f"  {ts_str} | plants={len(blobs)} | "
-          f"green={coverage:.2f}% | "
-          f"avg_area={stats['mean_blob_area']:.0f}px | "
+    print(f"  {ts_str} | active={len(active_cells)}/28 | "
+          f"avg={stats['avg_coverage']:.2f}% | "
+          f"total_green={stats['total_coverage_pct']:.2f}% | "
           f"quality={q}")
-
-    # Per-blob data for CSV
-    stats["blobs"] = [{
-        "id": i + 1,
-        "area": b["area"],
-        "cx": b["center_x"],
-        "cy": b["center_y"],
-    } for i, b in enumerate(blobs)]
 
     return stats
 
 
 def log_to_csv(stats):
-    """Append one capture's data to the CSV."""
+    """Append one row per cell per capture."""
     file_exists = os.path.exists(CSV_FILE)
 
     with open(CSV_FILE, "a", newline="") as f:
         writer = csv.writer(f)
         if not file_exists:
             writer.writerow([
-                "timestamp", "blob_count", "total_green_px", "coverage_pct",
-                "mean_blob_area", "max_blob_area", "min_blob_area",
-                "brightness", "sharpness", "quality_ok",
+                "timestamp", "cell_id", "row", "col",
+                "green_pixels", "total_pixels", "coverage_pct",
+                "brightness", "quality_ok",
             ])
-        writer.writerow([
-            stats["timestamp"],
-            stats["blob_count"],
-            stats["total_green_px"],
-            stats["coverage_pct"],
-            stats["mean_blob_area"],
-            stats["max_blob_area"],
-            stats["min_blob_area"],
-            stats["brightness"],
-            stats["sharpness"],
-            stats["quality_ok"],
-        ])
-
-
-def log_blobs_csv(stats):
-    """Append per-blob data to a separate CSV for tracking individual plants."""
-    blob_csv = os.path.join(OUTPUT_DIR, "blob_log.csv")
-    file_exists = os.path.exists(blob_csv)
-
-    with open(blob_csv, "a", newline="") as f:
-        writer = csv.writer(f)
-        if not file_exists:
-            writer.writerow(["timestamp", "blob_id", "area", "center_x", "center_y"])
-        for b in stats.get("blobs", []):
+        for m in stats["measurements"]:
             writer.writerow([
-                stats["timestamp"], b["id"], b["area"], b["cx"], b["cy"],
+                stats["timestamp"],
+                m["id"], m["row"], m["col"],
+                m["green_pixels"], m["total_pixels"], m["coverage_pct"],
+                round(stats["brightness"], 1),
+                stats["quality_ok"],
             ])
 
 
 def cmd_analyze(image_path=None, reprocess=False):
-    """Process images."""
     ensure_dirs()
 
     if image_path:
@@ -314,10 +290,8 @@ def cmd_analyze(image_path=None, reprocess=False):
 
     state = load_state()
     if reprocess:
-        # Wipe previous results
-        for f in [CSV_FILE, os.path.join(OUTPUT_DIR, "blob_log.csv")]:
-            if os.path.exists(f):
-                os.remove(f)
+        if os.path.exists(CSV_FILE):
+            os.remove(CSV_FILE)
         state = {"processed": []}
 
     new_files = [f for f in files if os.path.abspath(f) not in state["processed"]]
@@ -332,7 +306,6 @@ def cmd_analyze(image_path=None, reprocess=False):
         stats = analyze_image(filepath)
         if stats:
             log_to_csv(stats)
-            log_blobs_csv(stats)
             state["processed"].append(os.path.abspath(filepath))
 
     save_state(state)
@@ -340,7 +313,7 @@ def cmd_analyze(image_path=None, reprocess=False):
 
 
 def cmd_tune(image_path):
-    """Save debug images showing each segmentation step. No GUI needed."""
+    """Save debug images for HSV tuning. No GUI."""
     ensure_dirs()
 
     img = cv2.imread(image_path)
@@ -348,22 +321,22 @@ def cmd_tune(image_path):
         print(f"ERROR: can't load {image_path}")
         sys.exit(1)
 
-    print(f"Tuning on: {image_path} ({img.shape[1]}x{img.shape[0]})")
+    h, w = img.shape[:2]
+    print(f"Tuning on: {image_path} ({w}x{h})")
 
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
-    # Save HSV channels separately
+    # HSV channels
     for i, name in enumerate(["hue", "saturation", "value"]):
         ch = hsv[:, :, i]
         path = os.path.join(TUNE_DIR, f"channel_{name}.jpg")
         cv2.imwrite(path, ch)
-        print(f"  Saved {name} channel: {path} (range {ch.min()}-{ch.max()})")
+        print(f"  {name}: range {ch.min()}-{ch.max()}")
 
-    # Raw mask before cleanup
+    # Masks
     raw_mask = cv2.inRange(hsv, np.array(HSV_LOWER), np.array(HSV_UPPER))
     cv2.imwrite(os.path.join(TUNE_DIR, "mask_raw.jpg"), raw_mask)
 
-    # Cleaned mask
     mask = segment_green(img)
     cv2.imwrite(os.path.join(TUNE_DIR, "mask_clean.jpg"), mask)
 
@@ -373,29 +346,31 @@ def cmd_tune(image_path):
     blended = cv2.addWeighted(img, 0.5, overlay, 0.5, 0)
     cv2.imwrite(os.path.join(TUNE_DIR, "overlay.jpg"), blended)
 
-    # Blobs
-    blobs = find_blobs(mask)
-    print(f"\n  Found {len(blobs)} blobs with HSV {HSV_LOWER} - {HSV_UPPER}")
+    # Grid measurement
+    cells = get_grid_cells(h, w)
+    measurements = measure_cells(mask, cells)
+    active = [m for m in measurements if m["coverage_pct"] > 0.5]
+
+    print(f"\n  HSV: {HSV_LOWER} - {HSV_UPPER}")
     print(f"  Green pixels: {np.sum(mask > 0)} / {mask.size} "
           f"({np.sum(mask > 0) / mask.size * 100:.2f}%)")
+    print(f"  Active cells: {len(active)}/28")
+    print(f"\n  Per-cell coverage:")
+    for m in measurements:
+        marker = "█" if m["coverage_pct"] > 0.5 else "·"
+        print(f"    #{m['id']:2d} (r{m['row']}c{m['col']}): "
+              f"{m['coverage_pct']:6.2f}% {marker}")
 
-    if blobs:
-        areas = [b["area"] for b in blobs]
-        print(f"  Blob areas: min={min(areas)}, max={max(areas)}, "
-              f"mean={np.mean(areas):.0f}, median={np.median(areas):.0f}")
-
-    # Full annotated
+    # Annotated with grid
     stats = {
-        "blob_count": len(blobs),
+        "avg_coverage": np.mean([m["coverage_pct"] for m in measurements]),
         "total_green_px": int(np.sum(mask > 0)),
-        "coverage_pct": round(np.sum(mask > 0) / mask.size * 100, 3),
         "brightness": float(cv2.cvtColor(img, cv2.COLOR_BGR2GRAY).mean()),
     }
-    annotated = draw_annotated(img, mask, blobs, stats)
+    annotated = draw_annotated(img, mask, cells, measurements, stats)
     cv2.imwrite(os.path.join(TUNE_DIR, "annotated.jpg"), annotated)
 
-    print(f"\n  All debug images saved to {TUNE_DIR}/")
-    print(f"  Check overlay.jpg — if plants aren't highlighted, adjust HSV_LOWER/HSV_UPPER in analyze.py")
+    print(f"\n  Debug images saved to {TUNE_DIR}/")
 
 
 def main():
@@ -403,7 +378,6 @@ def main():
     parser.add_argument("--image", type=str, help="Analyze a specific image")
     parser.add_argument("--reprocess", action="store_true", help="Reprocess all images")
     parser.add_argument("--tune", action="store_true", help="Save debug images for HSV tuning")
-
     args = parser.parse_args()
 
     if args.tune:
