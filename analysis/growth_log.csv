@@ -1,0 +1,3 @@
+timestamp,blob_count,total_green_px,coverage_pct,mean_blob_area,max_blob_area,min_blob_area,brightness,sharpness,quality_ok
+2026-03-18_17-59-38,26,24390,3.101,862.5,1987,83,143.5231615702311,26.283537628070917,True
+2026-03-18_18-19-23,29,23834,3.031,755.2,2077,132,143.60361862182617,26.916427610435576,True
