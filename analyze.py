@@ -49,10 +49,14 @@ MORPH_ITER = 2
 # Margin inside each cell to avoid counting edge pixels (% of cell size)
 CELL_MARGIN_PCT = 5
 
+# Crop region to exclude tray edges: (x, y, w, h) or None
+# Applied before grid — grid boundaries are relative to cropped image
+CROP_REGION = (70, 50, 860, 660)
+
 # Custom column boundaries (x positions). Set to None for even spacing.
 # Adjust these to align grid lines with actual plant columns.
 # 7 values for 6 columns: [left_edge, col1|col2, col2|col3, ..., right_edge]
-CUSTOM_COL_BOUNDS = [0, 151, 341, 512, 683, 823, 1024]
+CUSTOM_COL_BOUNDS = [0, 123, 267, 410, 553, 697, 860]
 
 # Custom row boundaries. Set to None for even spacing.
 CUSTOM_ROW_BOUNDS = None
@@ -228,6 +232,12 @@ def analyze_image(filepath):
 
     ts = parse_timestamp(filepath)
     ts_str = ts.strftime("%Y-%m-%d_%H-%M-%S")
+
+    # Crop to tray interior
+    if CROP_REGION:
+        cx, cy, cw, ch = CROP_REGION
+        img = img[cy:cy+ch, cx:cx+cw]
+
     h, w = img.shape[:2]
 
     # Quality check
@@ -346,8 +356,12 @@ def cmd_tune(image_path):
         print(f"ERROR: can't load {image_path}")
         sys.exit(1)
 
+    if CROP_REGION:
+        cx, cy, cw, ch = CROP_REGION
+        img = img[cy:cy+ch, cx:cx+cw]
+
     h, w = img.shape[:2]
-    print(f"Tuning on: {image_path} ({w}x{h})")
+    print(f"Tuning on: {image_path} ({w}x{h}, cropped={CROP_REGION is not None})")
 
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
 
