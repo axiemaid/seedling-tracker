@@ -1,0 +1,9 @@
+{
+  "additionalFiles": "",
+  "compiler.optimization_flags": "-Os",
+  "customBuildProperties": "",
+  "fqbn": "esp32:esp32:esp32wrover",
+  "hardwareFolders": "/Users/axiemaid/Library/Arduino15/packages/esp32/hardware/esp32/3.3.7,/Users/axiemaid/Library/Arduino15/packages/esp32/hardware/esp32/3.3.7",
+  "otherLibrariesFolders": "/Users/axiemaid/Documents/Arduino/libraries",
+  "sketchLocation": "/Users/axiemaid/.openclaw/seedling-tracker/seedling_cam"
+}

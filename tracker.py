@@ -41,7 +41,7 @@ ANNOTATED_DIR = os.path.join(DATA_DIR, "annotated")
 CSV_FILE = os.path.join(DATA_DIR, "growth_log.csv")
 
 DEFAULT_CONFIG = {
-    "esp32_ip": "192.168.1.100",
+    "esp32_ip": "192.168.151.219",
     "esp32_port": 80,
     "grid_rows": 4,
     "grid_cols": 7,

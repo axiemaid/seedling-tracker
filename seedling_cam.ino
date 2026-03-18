@@ -21,8 +21,8 @@
 #include "soc/rtc_cntl_reg.h"
 
 // ==================== CONFIG ====================
-const char* ssid     = "YOUR_WIFI_SSID";
-const char* password = "YOUR_WIFI_PASSWORD";
+const char* ssid     = "222_5g_V768";
+const char* password = "5875b81f";
 
 // Resolution: higher = more detail but slower transfer
 // FRAMESIZE_UXGA  = 1600x1200  (may be unstable on some boards)
@@ -35,25 +35,26 @@ const char* password = "YOUR_WIFI_PASSWORD";
 #define JPEG_QUALITY 12
 
 // ==================== CAMERA PINS (ESP32-WROVER-CAM / ESP32-CAM AI-Thinker) ====================
-#define PWDN_GPIO_NUM     32
-#define RESET_GPIO_NUM    -1
-#define XCLK_GPIO_NUM      0
-#define SIOD_GPIO_NUM     26
-#define SIOC_GPIO_NUM     27
-#define Y9_GPIO_NUM       35
-#define Y8_GPIO_NUM       34
-#define Y7_GPIO_NUM       39
-#define Y6_GPIO_NUM       36
-#define Y5_GPIO_NUM       21
-#define Y4_GPIO_NUM       19
-#define Y3_GPIO_NUM       18
-#define Y2_GPIO_NUM        5
-#define VSYNC_GPIO_NUM    25
-#define HREF_GPIO_NUM     23
-#define PCLK_GPIO_NUM     22
+// ESP32-WROVER (Freenove) pin mapping
+#define PWDN_GPIO_NUM    -1
+#define RESET_GPIO_NUM   -1
+#define XCLK_GPIO_NUM    21
+#define SIOD_GPIO_NUM    26
+#define SIOC_GPIO_NUM    27
+#define Y9_GPIO_NUM      35
+#define Y8_GPIO_NUM      34
+#define Y7_GPIO_NUM      39
+#define Y6_GPIO_NUM      36
+#define Y5_GPIO_NUM      19
+#define Y4_GPIO_NUM      18
+#define Y3_GPIO_NUM       5
+#define Y2_GPIO_NUM       4
+#define VSYNC_GPIO_NUM   25
+#define HREF_GPIO_NUM    23
+#define PCLK_GPIO_NUM    22
 
-// Onboard flash LED (GPIO 4 on most ESP32-CAM boards)
-#define FLASH_LED_PIN      4
+// No onboard flash LED on WROVER
+// #define FLASH_LED_PIN   -1
 
 WiFiServer server(80);
 unsigned long bootTime;
@@ -64,10 +65,6 @@ void setup() {
   
   // Disable brownout detector (ESP32-CAM draws spikes on capture)
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0);
-  
-  // Flash LED off
-  pinMode(FLASH_LED_PIN, OUTPUT);
-  digitalWrite(FLASH_LED_PIN, LOW);
   
   // ---- Camera config ----
   camera_config_t config;
@@ -125,6 +122,8 @@ void setup() {
     s->set_brightness(s, 0);     // -2 to 2
     s->set_contrast(s, 0);       // -2 to 2
     s->set_saturation(s, 0);     // -2 to 2
+    s->set_vflip(s, 1);          // flip for overhead mount
+    s->set_hmirror(s, 1);
   }
   
   // ---- WiFi connect ----
