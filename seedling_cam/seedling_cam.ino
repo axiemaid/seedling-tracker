@@ -98,7 +98,7 @@ void setup() {
   sensor_t *s = esp_camera_sensor_get();
   if (s) {
     s->set_vflip(s, 1);       // flip for overhead mount
-    s->set_hmirror(s, 1);
+    s->set_hmirror(s, 0);
     s->set_whitebal(s, 1);
     s->set_awb_gain(s, 1);
     s->set_wb_mode(s, 0);     // auto
@@ -137,10 +137,27 @@ void setup() {
       request->send(500, "text/plain", "Camera capture failed");
       return;
     }
-    AsyncWebServerResponse *response = request->beginResponse_P(200, "image/jpeg", fb->buf, fb->len);
+    // Copy to PSRAM so we can return the frame buffer immediately
+    uint8_t *buf = (uint8_t *)ps_malloc(fb->len);
+    if (!buf) {
+      esp_camera_fb_return(fb);
+      request->send(500, "text/plain", "Memory allocation failed");
+      return;
+    }
+    size_t len = fb->len;
+    memcpy(buf, fb->buf, len);
+    esp_camera_fb_return(fb);
+    
+    AsyncWebServerResponse *response = request->beginResponse("image/jpeg", len,
+      [buf, len](uint8_t *buffer, size_t maxLen, size_t index) -> size_t {
+        size_t remaining = len - index;
+        size_t toSend = (remaining < maxLen) ? remaining : maxLen;
+        memcpy(buffer, buf + index, toSend);
+        if (index + toSend >= len) free(buf);
+        return toSend;
+      });
     response->addHeader("Access-Control-Allow-Origin", "*");
     request->send(response);
-    esp_camera_fb_return(fb);
   });
   
   server.on("/status", HTTP_GET, [](AsyncWebServerRequest *request) {

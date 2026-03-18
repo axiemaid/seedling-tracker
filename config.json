@@ -1,0 +1,40 @@
+{
+  "esp32_ip": "192.168.151.219",
+  "esp32_port": 80,
+  "grid_rows": 4,
+  "grid_cols": 7,
+  "perspective_corners": [
+    [
+      75,
+      36
+    ],
+    [
+      34,
+      615
+    ],
+    [
+      995,
+      654
+    ],
+    [
+      989,
+      29
+    ]
+  ],
+  "warped_width": 1400,
+  "warped_height": 800,
+  "hsv_lower": [
+    25,
+    30,
+    30
+  ],
+  "hsv_upper": [
+    95,
+    255,
+    255
+  ],
+  "cell_margin_pct": 10,
+  "capture_timeout_s": 10,
+  "retry_count": 3,
+  "retry_delay_s": 2
+}
