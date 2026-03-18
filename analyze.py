@@ -36,7 +36,7 @@ STATE_FILE = os.path.join(OUTPUT_DIR, ".state.json")
 
 # Grid: 4 rows x 7 columns = 28 plant slots
 GRID_ROWS = 4
-GRID_COLS = 7
+GRID_COLS = 6
 
 # HSV thresholds for yellow-green cotyledons under grow light
 HSV_LOWER = (25, 30, 100)
@@ -184,7 +184,7 @@ def draw_annotated(img, mask, cells, measurements, stats):
     # Summary bar
     cv2.rectangle(out, (0, 0), (w, 28), (0, 0, 0), -1)
     active = sum(1 for m in measurements if m["coverage_pct"] > 0.5)
-    summary = (f"Active plants: {active}/28 | "
+    summary = (f"Active plants: {active}/{GRID_ROWS * GRID_COLS} | "
                f"Avg coverage: {stats['avg_coverage']:.2f}% | "
                f"Total green: {stats['total_green_px']}px | "
                f"Brightness: {stats['brightness']:.0f}")
@@ -242,7 +242,7 @@ def analyze_image(filepath):
         cv2.imwrite(ann_path, annotated, [cv2.IMWRITE_JPEG_QUALITY, 90])
 
     q = "OK" if quality_ok else "WARN"
-    print(f"  {ts_str} | active={len(active_cells)}/28 | "
+    print(f"  {ts_str} | active={len(active_cells)}/{GRID_ROWS * GRID_COLS} | "
           f"avg={stats['avg_coverage']:.2f}% | "
           f"total_green={stats['total_coverage_pct']:.2f}% | "
           f"quality={q}")
@@ -354,7 +354,7 @@ def cmd_tune(image_path):
     print(f"\n  HSV: {HSV_LOWER} - {HSV_UPPER}")
     print(f"  Green pixels: {np.sum(mask > 0)} / {mask.size} "
           f"({np.sum(mask > 0) / mask.size * 100:.2f}%)")
-    print(f"  Active cells: {len(active)}/28")
+    print(f"  Active cells: {len(active)}/{GRID_ROWS * GRID_COLS}")
     print(f"\n  Per-cell coverage:")
     for m in measurements:
         marker = "█" if m["coverage_pct"] > 0.5 else "·"
