@@ -51,12 +51,12 @@ CELL_MARGIN_PCT = 5
 
 # Crop region to exclude tray edges: (x, y, w, h) or None
 # Applied before grid — grid boundaries are relative to cropped image
-CROP_REGION = (70, 50, 860, 660)
+CROP_REGION = None
 
 # Custom column boundaries (x positions). Set to None for even spacing.
 # Adjust these to align grid lines with actual plant columns.
 # 7 values for 6 columns: [left_edge, col1|col2, col2|col3, ..., right_edge]
-CUSTOM_COL_BOUNDS = [0, 123, 267, 410, 553, 697, 860]
+CUSTOM_COL_BOUNDS = [0, 151, 341, 512, 683, 823, 1024]
 
 # Custom row boundaries. Set to None for even spacing.
 CUSTOM_ROW_BOUNDS = None
