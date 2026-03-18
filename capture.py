@@ -22,7 +22,7 @@ def capture():
                     print(f"Attempt {attempt}: image too small ({len(data)} bytes)")
                     continue
                 
-                ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+                ts = datetime.now().strftime("%Y-%m-%d_%H-%M")
                 path = os.path.join(SAVE_DIR, f"{ts}.jpg")
                 with open(path, "wb") as f:
                     f.write(data)

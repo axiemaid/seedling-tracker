@@ -77,7 +77,7 @@ def save_state(state):
 
 def parse_timestamp(filepath):
     stem = Path(filepath).stem
-    for fmt in ["%Y-%m-%d_%H-%M-%S", "%Y-%m-%d_%H%M%S"]:
+    for fmt in ["%Y-%m-%d_%H-%M", "%Y-%m-%d_%H-%M-%S", "%Y-%m-%d_%H%M%S"]:
         try:
             return datetime.strptime(stem, fmt)
         except ValueError:
