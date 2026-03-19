@@ -59,7 +59,7 @@ CROP_REGION = None
 CUSTOM_COL_BOUNDS = [0, 151, 341, 512, 683, 823, 1024]
 
 # Custom row boundaries. Set to None for even spacing.
-CUSTOM_ROW_BOUNDS = None
+CUSTOM_ROW_BOUNDS = [0, 192, 344, 526, 768]
 
 
 def ensure_dirs():
