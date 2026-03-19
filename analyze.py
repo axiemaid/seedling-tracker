@@ -90,10 +90,25 @@ def parse_timestamp(filepath):
 
 
 def segment_green(img):
-    """HSV threshold + morphological cleanup → binary mask."""
+    """HSV threshold + specular highlight recovery + morphological cleanup."""
     hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+
+    # Pass 1: standard green detection
     mask = cv2.inRange(hsv, np.array(HSV_LOWER), np.array(HSV_UPPER))
 
+    # Pass 2: recover specular highlights adjacent to green pixels
+    # Highlights are high brightness, low saturation (washed out by light)
+    highlight_mask = cv2.inRange(hsv, np.array([0, 0, 200]), np.array([180, 40, 255]))
+
+    # Dilate green mask to create a "leaf neighborhood" zone
+    dilate_kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (15, 15))
+    green_zone = cv2.dilate(mask, dilate_kernel, iterations=2)
+
+    # Include highlights only if they're near existing green pixels
+    recovered = cv2.bitwise_and(highlight_mask, green_zone)
+    mask = cv2.bitwise_or(mask, recovered)
+
+    # Morphological cleanup
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (MORPH_KERNEL, MORPH_KERNEL))
     mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel, iterations=MORPH_ITER)
     mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel, iterations=MORPH_ITER)
